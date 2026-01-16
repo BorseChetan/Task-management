@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/_sdk/element_sdk.js"></script>
+    <script src="/_sdk/data_sdk.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&amp;display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+</head>
+
+<body class="h-full bg-animated text-white"><!-- Floating Orbs -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <main class="h-full w-full flex items-center justify-center p-4 md:p-8 relative z-10 overflow-auto">
+        <div class="card-3d w-full max-w-2xl rounded-3xl p-6 md:p-10"><!-- Header -->
+            <header class="text-center mb-8">
+                <h1 id="app-title" class="title-3d text-4xl md:text-5xl font-bold mb-3">Task Tracker</h1>
+                <p class="text-gray-400 text-lg">Stay organized, stay productive</p>
+            </header><!-- Stats -->
+            <div class="flex justify-center gap-8 mb-8">
+                <div class="text-center"><span id="total-count" class="stat-number text-3xl font-bold">0</span>
+                    <p class="text-gray-400 text-sm mt-1">Total</p>
+                </div>
+                <div class="text-center"><span id="pending-count" class="stat-number text-3xl font-bold">0</span>
+                    <p class="text-gray-400 text-sm mt-1">Pending</p>
+                </div>
+                <div class="text-center"><span id="completed-count" class="stat-number text-3xl font-bold">0</span>
+                    <p class="text-gray-400 text-sm mt-1">Completed</p>
+                </div>
+            </div><!-- Add Task Form -->
+            <form id="task-form" class="flex gap-3 mb-8"><label for="task-input" class="sr-only">Enter your task</label>
+                <input type="text" id="task-input" name="task"
+                    class="input-3d flex-1 px-5 py-4 rounded-xl text-white placeholder-gray-400 outline-none text-lg"
+                    placeholder="What needs to be done?" autocomplete="off"> <button type="submit" id="add-btn"
+                    class="btn-3d px-8 py-4 rounded-xl text-white font-semibold text-lg"> <span id="add-btn-text">Add
+                        Task</span> </button>
+            </form><!-- Task List -->
+            <div id="task-list" class="task-list space-y-4 max-h-96 overflow-y-auto pr-2">
+                <!-- Tasks will be rendered here -->
+            </div><!-- Empty State -->
+            <div id="empty-state" class="empty-state text-center py-16">
+                <div class="text-6xl mb-4">
+                    📋
+                </div>
+                <p id="empty-message" class="text-gray-400 text-xl">No tasks yet. Add one above!</p>
+            </div><!-- Limit Warning -->
+            <div id="limit-warning"
+                class="hidden mt-4 p-4 rounded-xl bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 text-center">
+                ⚠️ Maximum limit of 999 tasks reached. Please delete some tasks first.
+            </div>
+        </div>
+    </main>
+    <script>
+        // Default configuration
+        const defaultConfig = {
+            app_title: 'Task Tracker',
+            add_button_text: 'Add Task',
+            empty_message: 'No tasks yet. Add one above!',
+            background_color: '#0f0c29',
+            surface_color: 'rgba(255, 255, 255, 0.05)',
+            text_color: '#ffffff',
+            primary_action_color: '#8b5cf6',
+            secondary_action_color: '#6366f1'
+        };
+
+        // Store tasks locally for rendering
+        let tasks = [];
+        let pendingDeleteId = null;
+
+        // DOM Elements
+        const taskForm = document.getElementById('task-form');
+        const taskInput = document.getElementById('task-input');
+        const taskList = document.getElementById('task-list');
+        const emptyState = document.getElementById('empty-state');
+        const limitWarning = document.getElementById('limit-warning');
+        const totalCount = document.getElementById('total-count');
+        const pendingCount = document.getElementById('pending-count');
+        const completedCount = document.getElementById('completed-count');
+        const appTitle = document.getElementById('app-title');
+        const addBtnText = document.getElementById('add-btn-text');
+        const emptyMessage = document.getElementById('empty-message');
+        const addBtn = document.getElementById('add-btn');
+
+        // Data Handler for SDK
+        const dataHandler = {
+            onDataChanged(data) {
+                tasks = data;
+                renderTasks();
+                updateStats();
+            }
+        };
+
+        // Render tasks with selective updates
+        function renderTasks() {
+            const existingItems = new Map(
+                [...taskList.children].map(el => [el.dataset.taskId, el])
+            );
+
+            if (tasks.length === 0) {
+                taskList.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            // Sort by creation date (newest first)
+            const sortedTasks = [...tasks].sort((a, b) =>
+                new Date(b.createdAt) - new Date(a.createdAt)
+            );
+
+            sortedTasks.forEach((task, index) => {
+                const taskId = task.__backendId;
+
+                if (existingItems.has(taskId)) {
+                    // Update existing element
+                    const el = existingItems.get(taskId);
+                    updateTaskElement(el, task);
+                    existingItems.delete(taskId);
+                    taskList.appendChild(el);
+                } else {
+                    // Create new element
+                    const el = createTaskElement(task);
+                    el.style.animationDelay = `${index * 0.05}s`;
+                    taskList.appendChild(el);
+                }
+            });
+
+            // Remove deleted items
+            existingItems.forEach(el => el.remove());
+        }
+
+        // Create task element
+        function createTaskElement(task) {
+            const div = document.createElement('div');
+            div.className = `task-item rounded-xl p-4 flex items-center gap-4 ${task.completed ? 'task-completed' : ''}`;
+            div.dataset.taskId = task.__backendId;
+
+            div.innerHTML = `
+        <input 
+          type="checkbox" 
+          class="checkbox-3d flex-shrink-0" 
+          ${task.completed ? 'checked' : ''}
+          aria-label="Mark task as ${task.completed ? 'pending' : 'completed'}"
+        >
+        <span class="task-text flex-1 text-lg ${task.completed ? 'line-through text-gray-500' : ''}">${escapeHtml(task.text)}</span>
+        <span class="badge px-3 py-1 rounded-full text-xs font-semibold ${task.completed ? 'badge-completed' : 'badge-pending'}">
+          ${task.completed ? 'Completed' : 'Pending'}
+        </span>
+        <div class="action-container">
+          <button class="btn-delete w-10 h-10 rounded-xl flex items-center justify-center text-white" aria-label="Delete task">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+      `;
+
+            // Add event listeners
+            const checkbox = div.querySelector('.checkbox-3d');
+            checkbox.addEventListener('change', () => toggleTask(task));
+
+            const deleteBtn = div.querySelector('.btn-delete');
+            deleteBtn.addEventListener('click', () => showDeleteConfirm(div, task));
+
+            return div;
+        }
+
+        // Show inline delete confirmation
+        function showDeleteConfirm(el, task) {
+            const actionContainer = el.querySelector('.action-container');
+            actionContainer.innerHTML = `
+        <div class="confirm-delete-container">
+          <button class="btn-confirm-yes" aria-label="Confirm delete">Delete?</button>
+          <button class="btn-confirm-no" aria-label="Cancel delete">Cancel</button>
+        </div>
+      `;
+
+            const yesBtn = actionContainer.querySelector('.btn-confirm-yes');
+            const noBtn = actionContainer.querySelector('.btn-confirm-no');
+
+            yesBtn.addEventListener('click', () => deleteTask(task));
+            noBtn.addEventListener('click', () => {
+                actionContainer.innerHTML = `
+          <button class="btn-delete w-10 h-10 rounded-xl flex items-center justify-center text-white" aria-label="Delete task">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        `;
+                const newDeleteBtn = actionContainer.querySelector('.btn-delete');
+                newDeleteBtn.addEventListener('click', () => showDeleteConfirm(el, task));
+            });
+        }
+
+        // Update existing task element
+        function updateTaskElement(el, task) {
+            const checkbox = el.querySelector('.checkbox-3d');
+            const textSpan = el.querySelector('.task-text');
+            const badge = el.querySelector('.badge');
+
+            checkbox.checked = task.completed;
+            textSpan.textContent = task.text;
+            textSpan.className = `task-text flex-1 text-lg ${task.completed ? 'line-through text-gray-500' : ''}`;
+            badge.textContent = task.completed ? 'Completed' : 'Pending';
+            badge.className = `badge px-3 py-1 rounded-full text-xs font-semibold ${task.completed ? 'badge-completed' : 'badge-pending'}`;
+            el.className = `task-item rounded-xl p-4 flex items-center gap-4 ${task.completed ? 'task-completed' : ''}`;
+        }
+
+        // Update stats
+        function updateStats() {
+            const total = tasks.length;
+            const completed = tasks.filter(t => t.completed).length;
+            const pending = total - completed;
+
+            totalCount.textContent = total;
+            pendingCount.textContent = pending;
+            completedCount.textContent = completed;
+
+            // Show/hide limit warning
+            if (total >= 999) {
+                limitWarning.classList.remove('hidden');
+            } else {
+                limitWarning.classList.add('hidden');
+            }
+        }
+
+        // Add new task
+        async function addTask(text) {
+            if (tasks.length >= 999) {
+                limitWarning.classList.remove('hidden');
+                return;
+            }
+
+            addBtn.disabled = true;
+            addBtn.style.opacity = '0.7';
+
+            const result = await window.dataSdk.create({
+                text: text,
+                completed: false,
+                createdAt: new Date().toISOString()
+            });
+
+            addBtn.disabled = false;
+            addBtn.style.opacity = '1';
+
+            if (!result.isOk) {
+                showToast('Failed to add task. Please try again.');
+            }
+        }
+
+        // Toggle task completion
+        async function toggleTask(task) {
+            const result = await window.dataSdk.update({
+                ...task,
+                completed: !task.completed
+            });
+
+            if (!result.isOk) {
+                showToast('Failed to update task. Please try again.');
+            }
+        }
+
+        // Delete task
+        async function deleteTask(task) {
+            const result = await window.dataSdk.delete(task);
+
+            if (!result.isOk) {
+                showToast('Failed to delete task. Please try again.');
+            }
+        }
+
+        // Show toast message
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = 'fixed bottom-4 right-4 bg-red-500 text-white px-6 py-3 rounded-xl shadow-lg z-50 animate-pulse';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Form submit handler
+        taskForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = taskInput.value.trim();
+            if (text) {
+                await addTask(text);
+                taskInput.value = '';
+                taskInput.focus();
+            }
+        });
+
+        // Config change handler
+        async function onConfigChange(config) {
+            appTitle.textContent = config.app_title || defaultConfig.app_title;
+            addBtnText.textContent = config.add_button_text || defaultConfig.add_button_text;
+            emptyMessage.textContent = config.empty_message || defaultConfig.empty_message;
+        }
+
+        // Map to capabilities
+        function mapToCapabilities(config) {
+            return {
+                recolorables: [
+                    {
+                        get: () => config.primary_action_color || defaultConfig.primary_action_color,
+                        set: (value) => {
+                            config.primary_action_color = value;
+                            window.elementSdk.setConfig({ primary_action_color: value });
+                        }
+                    },
+                    {
+                        get: () => config.secondary_action_color || defaultConfig.secondary_action_color,
+                        set: (value) => {
+                            config.secondary_action_color = value;
+                            window.elementSdk.setConfig({ secondary_action_color: value });
+                        }
+                    }
+                ],
+                borderables: [],
+                fontEditable: {
+                    get: () => config.font_family || 'Outfit',
+                    set: (value) => {
+                        config.font_family = value;
+                        window.elementSdk.setConfig({ font_family: value });
+                    }
+                },
+                fontSizeable: {
+                    get: () => config.font_size || 16,
+                    set: (value) => {
+                        config.font_size = value;
+                        window.elementSdk.setConfig({ font_size: value });
+                    }
+                }
+            };
+        }
+
+        // Map to edit panel values
+        function mapToEditPanelValues(config) {
+            return new Map([
+                ['app_title', config.app_title || defaultConfig.app_title],
+                ['add_button_text', config.add_button_text || defaultConfig.add_button_text],
+                ['empty_message', config.empty_message || defaultConfig.empty_message]
+            ]);
+        }
+
+        // Initialize SDKs
+        async function init() {
+            // Initialize Element SDK
+            if (window.elementSdk) {
+                window.elementSdk.init({
+                    defaultConfig,
+                    onConfigChange,
+                    mapToCapabilities,
+                    mapToEditPanelValues
+                });
+            }
+
+            // Initialize Data SDK
+            if (window.dataSdk) {
+                const result = await window.dataSdk.init(dataHandler);
+                if (!result.isOk) {
+                    console.error('Failed to initialize data SDK');
+                }
+            }
+        }
+
+        init();
+    </script>
+    <script>(function () { function c() { var b = a.contentDocument || a.contentWindow.document; if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'9bedb17142603b3a',t:'MTc2ODU2NzM1MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
+</body>
+
+</html>
